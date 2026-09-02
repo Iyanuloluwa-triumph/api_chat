@@ -157,6 +157,9 @@ async def chat(request: ChatRequest):
         "products": matched_products
     }
 
+@app.get("/health")
+async def health_check():
+    return {"status": "healthy"}
 @app.post("/image-search")
 async def image_search(file: UploadFile = File(...)):
     image_bytes = await file.read()
