@@ -13,6 +13,11 @@ from cv_model import extract_image_description
 from contextlib import asynccontextmanager
 import urllib3
 from groq import Groq  # Make sure to run: pip install groq
+import gc
+
+# 1. Turn off PyTorch gradients globally to save memory
+torch.set_grad_enabled(False)
+torch.set_num_threads(1)  # Reduce from 2 to 1 on 512MB RAM free tier
 
 # Ensure this matches your router file name (e.g., organization_router.py or admin_router.py)
 from admin_router import router as organization_router
@@ -47,7 +52,13 @@ def update_embeddings_and_context():
         for p in PRODUCTS
     ]
     
-    product_embeddings = embedder.encode(product_texts, convert_to_tensor=True)
+    with torch.no_grad():
+        product_embeddings = embedder.encode(
+            product_texts, convert_to_tensor=True
+        )
+
+    # Force Python garbage collection to free temporary string/tensor arrays
+    gc.collect()
     print(f"Vector embeddings generated for {len(PRODUCTS)} products!")
 
 def fetch_and_embed_products():
