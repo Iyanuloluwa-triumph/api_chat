@@ -249,7 +249,7 @@ async def image_search(file: UploadFile = File(...)):
   image_name = getattr(file, "filename", "uploaded image")
   if matched_products:
     reply_text = (
-        f"I scanned your image ({image_nameS}) and found these matching items:"
+        f"I scanned your image ({image_name}) and found these matching items:"
     )
   else:
     reply_text = (
