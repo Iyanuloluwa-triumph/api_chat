@@ -1,4 +1,5 @@
 import gc
+import asyncio
 from contextlib import asynccontextmanager
 import json
 import os
@@ -56,6 +57,7 @@ def update_embeddings_and_context():
   # Free intermediate string/tensor memory
   gc.collect()
   print(f"Vector embeddings generated for {len(PRODUCTS)} products!")
+  
 
 
 def fetch_and_embed_products():
@@ -127,14 +129,32 @@ def fetch_and_embed_products():
       },
   ]
   update_embeddings_and_context()
+  
+async def periodic_refresh_interval(seconds : int):
+  try:
+    while True:
+      await asyncio.sleep(seconds)
+      await asyncio.to_thread(fetch_and_embed_products)
+      print(f"fetched latest products sleeping for {seconds // 60} minutes")
+      
+  except asyncio.CancelledError:
+    print("periodic refresh task cancelled")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
   print("FastAPI Application Starting Up...")
   fetch_and_embed_products()
+  
+  refresh_task = asyncio.create_task(periodic_refresh_interval(seconds=1200))
   yield
   print("FastAPI Application Shutting Down...")
+  refresh_task.cancel()
+  try:
+    await refresh_task
+  except asyncio.CancelledError:
+    pass
+  
 
 
 app = FastAPI(lifespan=lifespan)
