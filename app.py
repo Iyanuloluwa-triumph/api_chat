@@ -1,4 +1,5 @@
 import gc
+import threading
 import asyncio
 from contextlib import asynccontextmanager
 import json
@@ -33,6 +34,7 @@ JAVA_API_URL = os.environ.get(
 # Globals
 PRODUCTS = []
 product_embeddings = None
+model_lock = threading.Lock()
 
 print("Loading Embedding Model...")
 embedder = SentenceTransformer("all-MiniLM-L6-v2")
@@ -50,6 +52,21 @@ def update_embeddings_and_context():
   product_texts = [
       f"{p.get('name', '')} {p.get('description', '')}" for p in PRODUCTS
   ]
+  
+  with model_lock:
+    
+    # CRITICAL: Delete old tensor and run garbage collection BEFORE creating the new one
+    # to prevent a massive 2x memory spike on Render.
+    if product_embeddings is not None:
+        del product_embeddings
+        gc.collect()
+
+    with torch.no_grad():
+        product_embeddings = embedder.encode(product_texts, convert_to_tensor=True)
+
+    # Free intermediate strings
+  gc.collect()
+  print(f"Vector embeddings generated for {len(PRODUCTS)} products!")
 
   with torch.no_grad():
     product_embeddings = embedder.encode(product_texts, convert_to_tensor=True)
@@ -172,21 +189,25 @@ app.add_middleware(
 def find_relevant_products_vector(
     query: str, top_k: int = 3, min_similarity: float = 0.3
 ):
-  if product_embeddings is None or len(PRODUCTS) == 0:
-    return []
+    if product_embeddings is None or len(PRODUCTS) == 0:
+        return []
 
-  query_embedding = embedder.encode(query, convert_to_tensor=True)
-  similarity_scores = util.cos_sim(query_embedding, product_embeddings)[0]
+    # Wait safely in line if a background refresh is currently happening
+    with model_lock:
+        query_embedding = embedder.encode(query, convert_to_tensor=True)
+        # Calculate similarity inside the lock to ensure product_embeddings 
+        # doesn't get deleted by the background task midway through!
+        similarity_scores = util.cos_sim(query_embedding, product_embeddings)[0]
 
-  top_k = min(top_k, len(PRODUCTS))
-  top_results = torch.topk(similarity_scores, k=top_k)
+    top_k = min(top_k, len(PRODUCTS))
+    top_results = torch.topk(similarity_scores, k=top_k)
 
-  matches = []
-  for score, idx in zip(top_results.values, top_results.indices):
-    if score >= min_similarity:
-      matches.append(PRODUCTS[idx.item()])
+    matches = []
+    for score, idx in zip(top_results.values, top_results.indices):
+        if score >= min_similarity:
+            matches.append(PRODUCTS[idx.item()])
 
-  return matches
+    return matches
 
 
 class ChatRequest(BaseModel):
